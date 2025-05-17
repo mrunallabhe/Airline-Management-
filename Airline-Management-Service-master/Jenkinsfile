@@ -1,59 +1,43 @@
 pipeline {
-    agent any
+    agent {
+        docker {
+            image 'maven:3.9.6-eclipse-temurin-21'
+            args '-v /root/.m2:/root/.m2'
+        }
+    }
 
     environment {
-        IMAGE_NAME = "mrunallabhe/airline-management"
-        IMAGE_TAG = "latest"
-        EC2_USER = "ec2-user"
-        EC2_HOST = "98.82.11.52"
-        SSH_CRED_ID = "ec2-key"
-        APP_PORT = "8081"
+        EC2_HOST = '98.82.11.52' // Your EC2 IP
+        EC2_USER = 'ubuntu'
+        JAR_NAME = 'airline-management-0.0.1-SNAPSHOT.jar' // Change if needed
     }
 
     stages {
-        stage('Checkout') {
+        stage('Checkout Code') {
             steps {
-                git branch: 'main', url: 'https://github.com/mrunallabhe/Airline-Management-.git'
+                git 'https://github.com/mrunallabhe/Airline-Management-.git'
             }
         }
 
-        stage('Build Docker Image') {
+        stage('Build with Maven') {
             steps {
-                script {
-                    dockerImage = docker.build("${IMAGE_NAME}:${IMAGE_TAG}")
-                }
+                sh 'mvn clean package -DskipTests=false'
             }
         }
 
-        stage('Push Docker Image') {
+        stage('Run Tests') {
             steps {
-                withCredentials([usernamePassword(credentialsId: 'dockerhub-credentials', usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
-                    sh "echo $DOCKER_PASS | docker login -u $DOCKER_USER --password-stdin"
-                    sh "docker push ${IMAGE_NAME}:${IMAGE_TAG}"
-                }
+                sh 'mvn test'
             }
         }
 
         stage('Deploy to EC2') {
             steps {
-                sshagent (credentials: [SSH_CRED_ID]) {
+                sshagent (credentials: ['ec2-ssh']) {
                     sh """
-                    ssh -o StrictHostKeyChecking=no ${EC2_USER}@${EC2_HOST} '
-                        docker pull ${IMAGE_NAME}:${IMAGE_TAG} &&
-                        docker stop airline-management || true &&
-                        docker rm airline-management || true &&
-                        docker run -d --name airline-management -p ${APP_PORT}:8080 ${IMAGE_NAME}:${IMAGE_TAG}
-                    '
+                        scp -o StrictHostKeyChecking=no target/${JAR_NAME} ${EC2_USER}@${EC2_HOST}:/home/ubuntu/
+                        ssh ${EC2_USER}@${EC2_HOST} 'nohup java -jar /home/ubuntu/${JAR_NAME} > app.log 2>&1 &'
                     """
-                }
-            }
-        }
-
-        stage('Verify Deployment') {
-            steps {
-                script {
-                    sleep 10 // wait for app to start
-                    sh "curl -f http://${EC2_HOST}:${APP_PORT}/ || echo '❌ App not responding'"
                 }
             }
         }
@@ -61,10 +45,10 @@ pipeline {
 
     post {
         success {
-            echo '✅ Build and deployment succeeded!'
+            echo "✅ App successfully deployed at http://${EC2_HOST}:8080"
         }
         failure {
-            echo '❌ Build or deployment failed!'
+            echo "❌ Something went wrong during build or deployment!"
         }
     }
 }
