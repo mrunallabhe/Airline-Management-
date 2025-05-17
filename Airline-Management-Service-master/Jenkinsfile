@@ -1,15 +1,10 @@
 pipeline {
-    agent {
-        docker {
-            image 'maven:3.9.6-eclipse-temurin-21'
-            args '-v /root/.m2:/root/.m2'
-        }
-    }
+    agent any
 
     environment {
-        EC2_HOST = '98.82.11.52' // Your EC2 IP
+        EC2_HOST = '98.82.11.52'          // Change if your EC2 IP differs
         EC2_USER = 'ubuntu'
-        JAR_NAME = 'airline-management-0.0.1-SNAPSHOT.jar' // Change if needed
+        JAR_NAME = 'airline-management-0.0.1-SNAPSHOT.jar' // Adjust if needed
     }
 
     stages {
@@ -19,21 +14,27 @@ pipeline {
             }
         }
 
-        stage('Build with Maven') {
+        stage('Build with Docker Maven') {
             steps {
-                sh 'mvn clean package -DskipTests=false'
+                sh '''
+                    docker run --rm -v "$PWD":/app -v "$HOME/.m2":/root/.m2 -w /app \
+                    maven:3.9.6-eclipse-temurin-21 mvn clean package -DskipTests=false
+                '''
             }
         }
 
         stage('Run Tests') {
             steps {
-                sh 'mvn test'
+                sh '''
+                    docker run --rm -v "$PWD":/app -v "$HOME/.m2":/root/.m2 -w /app \
+                    maven:3.9.6-eclipse-temurin-21 mvn test
+                '''
             }
         }
 
         stage('Deploy to EC2') {
             steps {
-                sshagent (credentials: ['ec2-ssh']) {
+                sshagent(['ec2-ssh']) {
                     sh """
                         scp -o StrictHostKeyChecking=no target/${JAR_NAME} ${EC2_USER}@${EC2_HOST}:/home/ubuntu/
                         ssh ${EC2_USER}@${EC2_HOST} 'nohup java -jar /home/ubuntu/${JAR_NAME} > app.log 2>&1 &'
@@ -45,10 +46,10 @@ pipeline {
 
     post {
         success {
-            echo "✅ App successfully deployed at http://${EC2_HOST}:8080"
+            echo "✅ Deployed successfully: http://${EC2_HOST}:8080"
         }
         failure {
-            echo "❌ Something went wrong during build or deployment!"
+            echo "❌ Build or deployment failed."
         }
     }
 }
