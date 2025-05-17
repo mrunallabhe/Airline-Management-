@@ -2,44 +2,48 @@ pipeline {
     agent any
 
     environment {
-        EC2_HOST = 'ubuntu@98.82.11.52'
-        SSH_CREDENTIALS_ID = 'ec2-ssh'
+        EC2_HOST = 'ec2-user@98.82.11.52'
+        JAR_NAME = 'airline-management-service.jar'
     }
 
     stages {
+
         stage('Checkout Code') {
             steps {
-                git branch: 'main', url: 'https://github.com/mrunallabhe/Airline-Management-.git'
+                git url: 'https://github.com/mrunallabhe/Airline-Management-.git', branch: 'main'
             }
         }
 
         stage('Build with Docker Maven') {
-            steps {
-                script {
-                    docker.image('maven:3.9.6-eclipse-temurin-21').inside {
-                        sh 'mvn clean package -DskipTests'
-                    }
+            agent {
+                docker {
+                    image 'maven:3.8.7-eclipse-temurin-17-alpine'
+                    args '-v /root/.m2:/root/.m2'  // Use Maven cache
                 }
+            }
+            steps {
+                sh 'mvn clean package -DskipTests'
             }
         }
 
         stage('Run Tests') {
             steps {
-                script {
-                    docker.image('maven:3.9.6-eclipse-temurin-21').inside {
-                        sh 'mvn test'
-                    }
-                }
+                sh 'mvn test'
             }
         }
 
         stage('Deploy to EC2') {
             steps {
-                sshagent(credentials: [env.SSH_CREDENTIALS_ID]) {
-                    sh """
-                        scp target/*.jar ${EC2_HOST}:/home/ubuntu/app.jar
-                        ssh ${EC2_HOST} 'nohup java -jar /home/ubuntu/app.jar > app.log 2>&1 &'
-                    """
+                script {
+                    // Replace with the actual location of your JAR file if different
+                    sh '''
+                    echo "Deploying to EC2..."
+                    scp target/*.jar $EC2_HOST:~/app/$JAR_NAME
+                    ssh $EC2_HOST '
+                        pkill -f $JAR_NAME || true
+                        nohup java -jar ~/app/$JAR_NAME > ~/app/app.log 2>&1 &
+                    '
+                    '''
                 }
             }
         }
@@ -47,10 +51,10 @@ pipeline {
 
     post {
         failure {
-            echo "❌ Build or deployment failed."
+            echo '❌ Build or deployment failed.'
         }
         success {
-            echo "✅ Application deployed successfully!"
+            echo '✅ Deployment successful.'
         }
     }
 }
