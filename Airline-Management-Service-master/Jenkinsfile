@@ -2,11 +2,12 @@ pipeline {
     agent any
 
     environment {
-        IMAGE_NAME = "your-dockerhub-username/airline-management"
+        IMAGE_NAME = "mrunallabhe/airline-management"
         IMAGE_TAG = "latest"
         EC2_USER = "ec2-user"
-        EC2_HOST = "34.203.217.45"
-        PEM_PATH = "/root/.ssh/springboot.pem" // adjust path accordingly
+        EC2_HOST = "98.82.11.52"
+        SSH_CRED_ID = "ec2-key"
+        APP_PORT = "8081"
     }
 
     stages {
@@ -35,24 +36,35 @@ pipeline {
 
         stage('Deploy to EC2') {
             steps {
-                sh """
-                ssh -o StrictHostKeyChecking=no -i $PEM_PATH $EC2_USER@$EC2_HOST '
-                    docker pull ${IMAGE_NAME}:${IMAGE_TAG} &&
-                    docker stop airline-management || true &&
-                    docker rm airline-management || true &&
-                    docker run -d --name airline-management -p 8081:8081 ${IMAGE_NAME}:${IMAGE_TAG}
-                '
-                """
+                sshagent (credentials: [SSH_CRED_ID]) {
+                    sh """
+                    ssh -o StrictHostKeyChecking=no ${EC2_USER}@${EC2_HOST} '
+                        docker pull ${IMAGE_NAME}:${IMAGE_TAG} &&
+                        docker stop airline-management || true &&
+                        docker rm airline-management || true &&
+                        docker run -d --name airline-management -p ${APP_PORT}:8080 ${IMAGE_NAME}:${IMAGE_TAG}
+                    '
+                    """
+                }
+            }
+        }
+
+        stage('Verify Deployment') {
+            steps {
+                script {
+                    sleep 10 // wait for app to start
+                    sh "curl -f http://${EC2_HOST}:${APP_PORT}/ || echo '❌ App not responding'"
+                }
             }
         }
     }
 
     post {
-        failure {
-            echo 'Build or deployment failed!'
-        }
         success {
-            echo 'Build and deployment succeeded!'
+            echo '✅ Build and deployment succeeded!'
+        }
+        failure {
+            echo '❌ Build or deployment failed!'
         }
     }
 }
