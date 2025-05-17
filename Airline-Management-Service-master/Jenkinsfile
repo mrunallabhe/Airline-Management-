@@ -2,42 +2,43 @@ pipeline {
     agent any
 
     environment {
-        EC2_HOST = '98.82.11.52'          // Change if your EC2 IP differs
-        EC2_USER = 'ubuntu'
-        JAR_NAME = 'airline-management-0.0.1-SNAPSHOT.jar' // Adjust if needed
+        EC2_HOST = 'ubuntu@98.82.11.52'
+        SSH_CREDENTIALS_ID = 'ec2-ssh'
     }
 
-   stage('Checkout Code') {
-    steps {
-        git branch: 'main', url: 'https://github.com/mrunallabhe/Airline-Management-.git'
-    }
-}
-
+    stages {
+        stage('Checkout Code') {
+            steps {
+                git branch: 'main', url: 'https://github.com/mrunallabhe/Airline-Management-.git'
+            }
+        }
 
         stage('Build with Docker Maven') {
             steps {
-                sh '''
-                    docker run --rm -v "$PWD":/app -v "$HOME/.m2":/root/.m2 -w /app \
-                    maven:3.9.6-eclipse-temurin-21 mvn clean package -DskipTests=false
-                '''
+                script {
+                    docker.image('maven:3.9.6-eclipse-temurin-21').inside {
+                        sh 'mvn clean package -DskipTests'
+                    }
+                }
             }
         }
 
         stage('Run Tests') {
             steps {
-                sh '''
-                    docker run --rm -v "$PWD":/app -v "$HOME/.m2":/root/.m2 -w /app \
-                    maven:3.9.6-eclipse-temurin-21 mvn test
-                '''
+                script {
+                    docker.image('maven:3.9.6-eclipse-temurin-21').inside {
+                        sh 'mvn test'
+                    }
+                }
             }
         }
 
         stage('Deploy to EC2') {
             steps {
-                sshagent(['ec2-ssh']) {
+                sshagent(credentials: [env.SSH_CREDENTIALS_ID]) {
                     sh """
-                        scp -o StrictHostKeyChecking=no target/${JAR_NAME} ${EC2_USER}@${EC2_HOST}:/home/ubuntu/
-                        ssh ${EC2_USER}@${EC2_HOST} 'nohup java -jar /home/ubuntu/${JAR_NAME} > app.log 2>&1 &'
+                        scp target/*.jar ${EC2_HOST}:/home/ubuntu/app.jar
+                        ssh ${EC2_HOST} 'nohup java -jar /home/ubuntu/app.jar > app.log 2>&1 &'
                     """
                 }
             }
@@ -45,11 +46,11 @@ pipeline {
     }
 
     post {
-        success {
-            echo "✅ Deployed successfully: http://${EC2_HOST}:8080"
-        }
         failure {
             echo "❌ Build or deployment failed."
+        }
+        success {
+            echo "✅ Application deployed successfully!"
         }
     }
 }
