@@ -2,7 +2,7 @@ pipeline {
     agent any
 
     environment {
-        EC2_HOST = 'ec2-user@3.86.115.166
+        EC2_HOST = 'ec2-user@3.86.115.166'
         JAR_NAME = 'airline-management-service.jar'
     }
 
