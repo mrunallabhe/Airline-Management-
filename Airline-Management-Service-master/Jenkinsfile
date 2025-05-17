@@ -2,31 +2,33 @@ pipeline {
     agent any
 
     environment {
-        JAR_NAME = "airline-management-system-0.0.1-SNAPSHOT.jar"
+        IMAGE_NAME = "your-dockerhub-username/airline-management"
+        IMAGE_TAG = "latest"
         EC2_USER = "ec2-user"
-        EC2_HOST = "34.203.217.45"  // Replace with your actual EC2 public IP
-        PEM_PATH = "/root/.ssh/springboot.pem"  // Path inside Jenkins container
+        EC2_HOST = "34.203.217.45"
+        PEM_PATH = "/root/.ssh/springboot.pem" // adjust path accordingly
     }
 
     stages {
         stage('Checkout') {
             steps {
-                checkout scm
+                git branch: 'main', url: 'https://github.com/mrunallabhe/Airline-Management-.git'
             }
         }
 
-        stage('Build and Test') {
+        stage('Build Docker Image') {
             steps {
                 script {
-                    // Translate Windows Jenkins workspace path to Docker mount path
-                    def workspacePath = pwd()
-                    // Convert Windows drive letter and backslashes to Unix style for Docker
-                    def dockerWorkspace = workspacePath.replaceAll('\\\\', '/').replaceAll('C:', '/c')
+                    dockerImage = docker.build("${IMAGE_NAME}:${IMAGE_TAG}")
+                }
+            }
+        }
 
-                    docker.image('maven:3.9.6-eclipse-temurin-21').inside("-v ${dockerWorkspace}:${dockerWorkspace} -w ${dockerWorkspace}") {
-                        sh 'mvn clean package'
-                        sh 'mvn test'
-                    }
+        stage('Push Docker Image') {
+            steps {
+                withCredentials([usernamePassword(credentialsId: 'dockerhub-credentials', usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
+                    sh "echo $DOCKER_PASS | docker login -u $DOCKER_USER --password-stdin"
+                    sh "docker push ${IMAGE_NAME}:${IMAGE_TAG}"
                 }
             }
         }
@@ -34,9 +36,12 @@ pipeline {
         stage('Deploy to EC2') {
             steps {
                 sh """
-                chmod 400 $PEM_PATH
-                scp -o StrictHostKeyChecking=no -i $PEM_PATH target/$JAR_NAME $EC2_USER@$EC2_HOST:/home/ec2-user/
-                ssh -o StrictHostKeyChecking=no -i $PEM_PATH $EC2_USER@$EC2_HOST "pkill -f $JAR_NAME || true && nohup java -jar /home/ec2-user/$JAR_NAME > app.log 2>&1 &"
+                ssh -o StrictHostKeyChecking=no -i $PEM_PATH $EC2_USER@$EC2_HOST '
+                    docker pull ${IMAGE_NAME}:${IMAGE_TAG} &&
+                    docker stop airline-management || true &&
+                    docker rm airline-management || true &&
+                    docker run -d --name airline-management -p 8081:8081 ${IMAGE_NAME}:${IMAGE_TAG}
+                '
                 """
             }
         }
@@ -44,7 +49,7 @@ pipeline {
 
     post {
         failure {
-            echo 'Build failed!'
+            echo 'Build or deployment failed!'
         }
         success {
             echo 'Build and deployment succeeded!'
